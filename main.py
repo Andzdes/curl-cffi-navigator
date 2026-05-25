@@ -35,7 +35,7 @@ def get_cache_path(url: str, suffix: str) -> str:
     hash_name = hashlib.md5(url.encode('utf-8')).hexdigest()
     return os.path.join(CACHE_DIR, f"{hash_name}_{suffix}")
 
-def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies: dict=None, impersonate: str="chrome") -> str:
+def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies: dict=None, impersonate: str="chrome"):
     kwargs = {
         "impersonate": impersonate,
         "timeout": 15
@@ -48,9 +48,7 @@ def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies:
         kwargs["cookies"] = cookies
         
     try:
-        response = requests.get(url, **kwargs)
-        response.raise_for_status()
-        return response.text
+        return requests.get(url, **kwargs)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch {url}: {str(e)}")
 
@@ -136,11 +134,15 @@ def get_page(req: FetchRequest):
         with open(cache_path, "r", encoding="utf-8") as f:
             return json.loads(f.read())
 
-    html = fetch_with_curl_cffi(req.url, req.proxy, req.headers, req.cookies, req.impersonate)
+    response = fetch_with_curl_cffi(req.url, req.proxy, req.headers, req.cookies, req.impersonate)
+    html = response.text
     
     caps = detect_required_capabilities(html)
     if caps:
         return {"requires": caps, "cached": False}
+        
+    if response.status_code >= 400:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch {req.url}: HTTP Error {response.status_code}")
     
     extracted = trafilatura.extract(
         html, 
