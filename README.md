@@ -22,6 +22,7 @@ Only `url` is required. All other parameters are optional.
 | `output_format` | string | `"markdown"` | Format of extracted content. Available: `"markdown"`, `"text"`, `"html"`. |
 | `include_links` | boolean | `false` | If `true`, keeps inline links in the Markdown/Text output. |
 | `include_images` | boolean | `false` | If `true`, keeps inline images in the Markdown/Text output. |
+| `proxy_retries` | integer | `3` | Number of retry attempts upon proxy errors. |
 
 ### Response (`for_agent: false`)
 ```json
@@ -59,7 +60,8 @@ Used by the LLM agent to navigate to a new page using ONLY the text of the link 
   "source_url": "https://example.com",
   "link_text": "Contact",
   "proxy": null,
-  "impersonate": "chrome"
+  "impersonate": "chrome",
+  "proxy_retries": 3
 }
 ```
 

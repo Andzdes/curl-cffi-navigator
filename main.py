@@ -1,12 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 from curl_cffi import requests
 import trafilatura
 import yaml
 import json
 import hashlib
 import os
+import time
 
 app = FastAPI(title="Universal HTML Parser")
 
@@ -24,18 +24,20 @@ class FetchRequest(BaseModel):
     include_links: bool = False
     include_images: bool = False
     for_agent: bool = False
+    proxy_retries: int = 3
 
 class ClickRequest(BaseModel):
     source_url: str
     link_text: str
     proxy: str | None = None
     impersonate: str = "chrome"
+    proxy_retries: int = 3
 
 def get_cache_path(url: str, suffix: str) -> str:
     hash_name = hashlib.md5(url.encode('utf-8')).hexdigest()
     return os.path.join(CACHE_DIR, f"{hash_name}_{suffix}")
 
-def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies: dict=None, impersonate: str="chrome"):
+def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies: dict=None, impersonate: str="chrome", proxy_retries: int=3):
     kwargs = {
         "impersonate": impersonate,
         "timeout": 15
@@ -47,10 +49,30 @@ def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies:
     if cookies:
         kwargs["cookies"] = cookies
         
-    try:
-        return requests.get(url, **kwargs)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch {url}: {str(e)}")
+    last_error = None
+    for attempt in range(proxy_retries + 1):
+        try:
+            return requests.get(url, **kwargs)
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            
+            # Determine if the error is specifically related to the proxy (code 56, tunnel failed, proxy etc.)
+            is_proxy_error = proxy and (
+                "connect tunnel failed" in error_str or 
+                "proxy" in error_str or 
+                "curl: (56)" in error_str or 
+                "curl: (97)" in error_str
+            )
+            
+            if is_proxy_error and attempt < proxy_retries:
+                time.sleep(1)
+                continue
+            
+            # If the error is not proxy-related or retries are exhausted, break the loop
+            break
+            
+    raise HTTPException(status_code=500, detail=f"Failed to fetch {url}: {str(last_error)}")
 
 def detect_required_capabilities(html: str) -> list[str]:
     capabilities = []
@@ -134,7 +156,7 @@ def get_page(req: FetchRequest):
         with open(cache_path, "r", encoding="utf-8") as f:
             return json.loads(f.read())
 
-    response = fetch_with_curl_cffi(req.url, req.proxy, req.headers, req.cookies, req.impersonate)
+    response = fetch_with_curl_cffi(req.url, req.proxy, req.headers, req.cookies, req.impersonate, req.proxy_retries)
     html = response.text
     
     caps = detect_required_capabilities(html)
@@ -206,6 +228,7 @@ def click_link(req: ClickRequest):
         url=target_url,
         proxy=req.proxy,
         impersonate=req.impersonate,
-        for_agent=True
+        for_agent=True,
+        proxy_retries=req.proxy_retries
     )
     return get_page(fetch_req)
