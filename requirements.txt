@@ -3,3 +3,5 @@ uvicorn
 curl_cffi
 trafilatura
 pyyaml
+markdownify
+beautifulsoup4

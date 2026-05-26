@@ -23,6 +23,7 @@ Only `url` is required. All other parameters are optional.
 | `include_links` | boolean | `false` | If `true`, keeps inline links in the Markdown/Text output. |
 | `include_images` | boolean | `false` | If `true`, keeps inline images in the Markdown/Text output. |
 | `proxy_retries` | integer | `3` | Number of retry attempts upon proxy errors. |
+| `boilerplate` | boolean | `true` | If `true`, returns full unfiltered webpage content (including headers/footers). If `false`, applies heuristic to extract only the main article content. |
 
 ### Response (`for_agent: false`)
 ```json

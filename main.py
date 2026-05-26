@@ -40,6 +40,7 @@ class FetchRequest(BaseModel):
     include_images: bool = False
     for_agent: bool = False
     proxy_retries: int = 3
+    boilerplate: bool = True
 
 class ClickRequest(BaseModel):
     source_url: str
@@ -192,13 +193,46 @@ def get_page(req: FetchRequest):
     if response.status_code >= 400:
         raise HTTPException(status_code=500, detail=f"Failed to fetch {req.url}: HTTP Error {response.status_code}")
     
-    extracted = trafilatura.extract(
-        html, 
-        include_tables=True, 
-        include_links=req.include_links,
-        include_images=req.include_images,
-        output_format=req.output_format if req.output_format in ["markdown", "text"] else "markdown"
-    )
+    if req.boilerplate:
+        try:
+            import markdownify
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, "html.parser")
+            # Remove scripts, styles, and other non-content tags
+            for x in soup(["script", "style", "noscript", "svg", "iframe"]):
+                x.extract()
+                
+            strip_tags = []
+            if not req.include_links:
+                strip_tags.append('a')
+            if not req.include_images:
+                strip_tags.append('img')
+                
+            extracted = markdownify.markdownify(
+                str(soup), 
+                heading_style="ATX", 
+                strip=strip_tags if strip_tags else None
+            )
+            if extracted:
+                extracted = extracted.strip()
+        except ImportError:
+            # Fallback if markdownify or bs4 are not installed
+            extracted = trafilatura.extract(
+                html, 
+                include_tables=True, 
+                include_links=req.include_links,
+                include_images=req.include_images,
+                output_format=req.output_format if req.output_format in ["markdown", "text"] else "markdown"
+            )
+    else:
+        extracted = trafilatura.extract(
+            html, 
+            include_tables=True, 
+            include_links=req.include_links,
+            include_images=req.include_images,
+            output_format=req.output_format if req.output_format in ["markdown", "text"] else "markdown"
+        )
+        
     if not extracted:
         extracted = ""
         
