@@ -55,6 +55,16 @@ Optimized for LLM context windows.
 Used by the LLM agent to navigate to a new page using ONLY the text of the link (relies on server-side caching mapping).
 
 ### Request Body
+
+**Required Parameters:**
+- `source_url` (string): The URL of the page the agent is currently on.
+- `link_text` (string): The exact text of the link the agent wants to click (e.g., "About Us" or "Contact").
+
+**Optional Parameters:**
+- `proxy` (string): HTTP/HTTPS proxy URL.
+- `impersonate` (string): Browser to impersonate (default: "chrome").
+- `proxy_retries` (integer): Number of times to retry on proxy failure (default: 3).
+
 ```json
 {
   "source_url": "https://example.com",

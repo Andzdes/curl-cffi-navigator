@@ -7,8 +7,23 @@ import json
 import hashlib
 import os
 import time
+import re
+
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi import Request
 
 app = FastAPI(title="Universal HTML Parser")
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body = await request.body()
+    print(f"--- 422 VALIDATION ERROR ---", flush=True)
+    print(f"URL: {request.url}", flush=True)
+    print(f"Body received: {body.decode('utf-8', errors='ignore')}", flush=True)
+    print(f"Errors: {exc.errors()}", flush=True)
+    print(f"----------------------------", flush=True)
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 CACHE_DIR = "cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -33,8 +48,19 @@ class ClickRequest(BaseModel):
     impersonate: str = "chrome"
     proxy_retries: int = 3
 
+def normalize_url_for_cache(url: str) -> str:
+    url = url.strip()
+    # Remove http:// or https://
+    url = re.sub(r'^https?://', '', url)
+    # Remove www.
+    if url.startswith('www.'):
+        url = url[4:]
+    # Remove optional trailing slashes
+    return url.rstrip('/')
+
 def get_cache_path(url: str, suffix: str) -> str:
-    hash_name = hashlib.md5(url.encode('utf-8')).hexdigest()
+    normalized_url = normalize_url_for_cache(url)
+    hash_name = hashlib.md5(normalized_url.encode('utf-8')).hexdigest()
     return os.path.join(CACHE_DIR, f"{hash_name}_{suffix}")
 
 def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies: dict=None, impersonate: str="chrome", proxy_retries: int=3):
