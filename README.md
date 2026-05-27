@@ -15,6 +15,7 @@ Only `url` is required. All other parameters are optional.
 | `url` | string | **Required** | The target website URL. |
 | `for_agent` | boolean | `false` | If `true`, returns only the text titles of links (to save tokens). If `false`, returns key-value mapping of `{ "Link Text": "URL" }`. |
 | `show_external_links` | boolean | `true` (if `for_agent=true`) | If `true` (and `for_agent` is `true`), displays external links in the format `"Text (URL)"`. Internal links remain just text. |
+| `extract_social_links` | boolean | `false` | If `true`, extracts social media links (based on domain) into a dedicated `"socials"` array containing just their URLs, and excludes them from regular navigation groups. |
 | `proxy` | string | `null` | Proxy URL (e.g., `http://user:pass@proxy.com:8000`). |
 | `headers` | object | `null` | Custom HTTP headers dictionary. |
 | `cookies` | object | `null` | Custom cookies dictionary. |
@@ -59,6 +60,17 @@ Optimized for LLM context windows.
   }
 ```
 
+*Note: If `extract_social_links: true` is provided, social links are grouped into a dedicated array:*
+```json
+  "navigation": {
+    "nav": ["About Us", "Contact"],
+    "socials": [
+      "https://facebook.com/example",
+      "https://instagram.com/example"
+    ]
+  }
+```
+
 ## 2. Navigate via Link Text (`POST /api/click_link`)
 
 Used by the LLM agent to navigate to a new page using ONLY the text of the link (relies on server-side caching mapping).
@@ -93,5 +105,27 @@ If the server detects that the page requires JavaScript rendering (e.g. Cloudfla
 {
   "requires": ["javascript"],
   "cached": false
+}
+```
+
+## 3. Clear Cache (`POST /api/clear_cache`)
+
+Clears the cache either entirely or for a specific URL.
+
+### Request Body
+
+**Optional Parameters:**
+- `url` (string): If provided, only the cache for this specific URL is cleared. If omitted, the entire cache is cleared.
+
+```json
+{
+  "url": "https://example.com"
+}
+```
+
+### Response
+```json
+{
+  "detail": "Cache cleared for URL. Deleted 3 files."
 }
 ```

@@ -29,6 +29,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 CACHE_DIR = "cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+SOCIAL_DOMAINS = {
+    "facebook.com", "instagram.com", "twitter.com", "x.com", 
+    "linkedin.com", "youtube.com", "tiktok.com", "pinterest.com", 
+    "snapchat.com", "reddit.com", "discord.com", "t.me", 
+    "telegram.me", "whatsapp.com", "github.com", "wa.me"
+}
+
 class FetchRequest(BaseModel):
     url: str
     proxy: str | None = None
@@ -41,6 +48,7 @@ class FetchRequest(BaseModel):
     include_images: bool = False
     for_agent: bool = False
     show_external_links: bool | None = None
+    extract_social_links: bool = False
     proxy_retries: int = 3
     boilerplate: bool = True
 
@@ -50,6 +58,9 @@ class ClickRequest(BaseModel):
     proxy: str | None = None
     impersonate: str = "chrome"
     proxy_retries: int = 3
+
+class ClearCacheRequest(BaseModel):
+    url: str | None = None
 
 def normalize_url_for_cache(url: str) -> str:
     url = url.strip()
@@ -119,7 +130,7 @@ def detect_required_capabilities(html: str) -> list[str]:
             
     return capabilities
 
-def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_links: bool = False):
+def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_links: bool = False, extract_social_links: bool = False):
     links_by_group = {
         "nav": {},
         "header": {},
@@ -130,6 +141,8 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
         "other": {}
     }
     
+    social_urls = []
+    
     try:
         from lxml import html as lxml_html
         tree = lxml_html.fromstring(html)
@@ -137,22 +150,31 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
         
         seen_urls = set()
         
+        def process_a_tag(a, group_name):
+            url = a.get('href')
+            if not url or not (url.startswith('http') or url.startswith('/')): return
+            if url in seen_urls: return
+            
+            if extract_social_links:
+                ext = tldextract.extract(url)
+                domain = f"{ext.domain}.{ext.suffix}"
+                if domain in SOCIAL_DOMAINS:
+                    social_urls.append(url)
+                    seen_urls.add(url)
+                    return
+            
+            text = a.text_content().strip()
+            if not text: return
+            
+            links_by_group[group_name][text] = url
+            seen_urls.add(url)
+
         for group in ["nav", "header", "footer", "main", "article", "aside"]:
             for a in tree.xpath(f"//{group}//a[@href]"):
-                url = a.get('href')
-                text = a.text_content().strip()
-                if not text: continue
-                if (url.startswith('http') or url.startswith('/')) and url not in seen_urls:
-                    links_by_group[group][text] = url
-                    seen_urls.add(url)
+                process_a_tag(a, group)
                     
         for a in tree.xpath("//a[@href]"):
-            url = a.get('href')
-            text = a.text_content().strip()
-            if not text: continue
-            if (url.startswith('http') or url.startswith('/')) and url not in seen_urls:
-                links_by_group["other"][text] = url
-                seen_urls.add(url)
+            process_a_tag(a, "other")
                 
     except Exception:
         pass
@@ -186,6 +208,12 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
             
         for text, url in items.items():
             url_map[text] = url
+            
+    if extract_social_links and social_urls:
+        final_links["socials"] = social_urls
+        # Adding to url_map so they are optionally reachable if needed, though they don't have text
+        for url in social_urls:
+            url_map[url] = url
             
     return final_links, url_map
 
@@ -268,7 +296,7 @@ def get_page(req: FetchRequest):
     final_markdown = f"---\n{yaml_frontmatter}---\n\n{extracted}" if yaml_frontmatter else extracted
     
     actual_show_ext = req.show_external_links if req.show_external_links is not None else req.for_agent
-    final_links, url_map = extract_links_data(html, req.url, req.for_agent, actual_show_ext)
+    final_links, url_map = extract_links_data(html, req.url, req.for_agent, actual_show_ext, req.extract_social_links)
     
     response_data = {
         "markdown": final_markdown,
@@ -309,3 +337,31 @@ def click_link(req: ClickRequest):
         proxy_retries=req.proxy_retries
     )
     return get_page(fetch_req)
+
+@app.post("/api/clear_cache")
+def clear_cache(req: ClearCacheRequest):
+    import shutil
+    
+    deleted_files = 0
+    if req.url:
+        normalized_url = normalize_url_for_cache(req.url)
+        hash_name = hashlib.md5(normalized_url.encode('utf-8')).hexdigest()
+        
+        for filename in os.listdir(CACHE_DIR):
+            if filename.startswith(hash_name):
+                file_path = os.path.join(CACHE_DIR, filename)
+                try:
+                    os.remove(file_path)
+                    deleted_files += 1
+                except Exception:
+                    pass
+        return {"detail": f"Cache cleared for URL. Deleted {deleted_files} files."}
+    else:
+        for filename in os.listdir(CACHE_DIR):
+            file_path = os.path.join(CACHE_DIR, filename)
+            try:
+                os.remove(file_path)
+                deleted_files += 1
+            except Exception:
+                pass
+        return {"detail": f"Entire cache cleared. Deleted {deleted_files} files."}

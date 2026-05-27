@@ -16,3 +16,4 @@ venv.bak/
 
 # Project specific
 cache/
+test*
