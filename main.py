@@ -14,6 +14,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi import Request
 
+from url_cleaner import cleaner
+
 app = FastAPI(title="Universal HTML Parser")
 
 @app.exception_handler(RequestValidationError)
@@ -51,6 +53,7 @@ class FetchRequest(BaseModel):
     extract_social_links: bool = False
     proxy_retries: int = 3
     boilerplate: bool = True
+    clean_url: bool = True
 
 class ClickRequest(BaseModel):
     source_url: str
@@ -59,9 +62,11 @@ class ClickRequest(BaseModel):
     impersonate: str = "chrome"
     proxy_retries: int = 3
     for_agent: bool = False
+    clean_url: bool = True
 
 class ClearCacheRequest(BaseModel):
     url: str | None = None
+    clean_url: bool = True
 
 def normalize_url_for_cache(url: str) -> str:
     url = url.strip()
@@ -130,7 +135,7 @@ def detect_required_capabilities(html: str) -> list[str]:
             
     return capabilities
 
-def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_links: bool = False, extract_social_links: bool = False):
+def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_links: bool = False, extract_social_links: bool = False, clean_urls: bool = True):
     links_by_group = {
         "nav": {},
         "header": {},
@@ -153,6 +158,10 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
         def process_a_tag(a, group_name):
             url = a.get('href')
             if not url or not (url.startswith('http') or url.startswith('/')): return
+            
+            if clean_urls:
+                url = cleaner.clean(url)
+                
             if url in seen_urls: return
             
             if extract_social_links:
@@ -219,6 +228,9 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
 
 @app.post("/api/get_page")
 def get_page(req: FetchRequest):
+    if req.clean_url:
+        req.url = cleaner.clean(req.url)
+
     suffix = "agent_page.json" if req.for_agent else "full_page.json"
     cache_path = get_cache_path(req.url, suffix)
     map_cache_path = get_cache_path(req.url, "urlmap.json")
@@ -296,7 +308,7 @@ def get_page(req: FetchRequest):
     final_markdown = f"---\n{yaml_frontmatter}---\n\n{extracted}" if yaml_frontmatter else extracted
     
     actual_show_ext = req.show_external_links if req.show_external_links is not None else req.for_agent
-    final_links, url_map = extract_links_data(html, req.url, req.for_agent, actual_show_ext, req.extract_social_links)
+    final_links, url_map = extract_links_data(html, req.url, req.for_agent, actual_show_ext, req.extract_social_links, req.clean_url)
     
     response_data = {
         "markdown": final_markdown,
@@ -317,6 +329,9 @@ def get_page(req: FetchRequest):
 
 @app.post("/api/click_link")
 def click_link(req: ClickRequest):
+    if req.clean_url:
+        req.source_url = cleaner.clean(req.source_url)
+        
     map_cache_path = get_cache_path(req.source_url, "urlmap.json")
     if not os.path.exists(map_cache_path):
         raise HTTPException(status_code=400, detail="Source URL link map not found in cache. Please call /api/get_page first.")
@@ -358,7 +373,8 @@ def click_link(req: ClickRequest):
         proxy=req.proxy,
         impersonate=req.impersonate,
         for_agent=req.for_agent,
-        proxy_retries=req.proxy_retries
+        proxy_retries=req.proxy_retries,
+        clean_url=req.clean_url
     )
     return get_page(fetch_req)
 
@@ -368,6 +384,9 @@ def clear_cache(req: ClearCacheRequest):
     
     deleted_files = 0
     if req.url:
+        if req.clean_url:
+            req.url = cleaner.clean(req.url)
+            
         normalized_url = normalize_url_for_cache(req.url)
         hash_name = hashlib.md5(normalized_url.encode('utf-8')).hexdigest()
         

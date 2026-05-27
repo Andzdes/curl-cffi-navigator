@@ -26,6 +26,7 @@ Only `url` is required. All other parameters are optional.
 | `include_images` | boolean | `false` | If `true`, keeps inline images in the Markdown/Text output. |
 | `proxy_retries` | integer | `3` | Number of retry attempts upon proxy errors. |
 | `boilerplate` | boolean | `true` | If `true`, returns full unfiltered webpage content (including headers/footers). If `false`, applies heuristic to extract only the main article content. |
+| `clean_url` | boolean | `true` | If `true`, automatically removes tracking and garbage parameters (like `utm_*`, `gclid`) from the requested URL and all extracted links using ClearURLs rules. |
 
 ### Response (`for_agent: false`)
 ```json
@@ -86,6 +87,7 @@ Used by the LLM agent to navigate to a new page using ONLY the text of the link 
 - `impersonate` (string): Browser to impersonate (default: "chrome").
 - `proxy_retries` (integer): Number of times to retry on proxy failure (default: 3).
 - `for_agent` (boolean): If `true`, enables agent-friendly responses (soft errors on 404) and formats the output for the LLM (default: `false`).
+- `clean_url` (boolean): If `true`, strips tracking parameters from `source_url` before looking up link mappings (default: `true`).
 
 ```json
 {
@@ -120,6 +122,7 @@ Clears the cache either entirely or for a specific URL.
 
 **Optional Parameters:**
 - `url` (string): If provided, only the cache for this specific URL is cleared. If omitted, the entire cache is cleared.
+- `clean_url` (boolean): If `true`, strips tracking parameters from `url` before clearing its cache (default: `true`).
 
 ```json
 {
