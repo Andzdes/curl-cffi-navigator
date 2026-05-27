@@ -14,6 +14,7 @@ Only `url` is required. All other parameters are optional.
 | --- | --- | --- | --- |
 | `url` | string | **Required** | The target website URL. |
 | `for_agent` | boolean | `false` | If `true`, returns only the text titles of links (to save tokens). If `false`, returns key-value mapping of `{ "Link Text": "URL" }`. |
+| `show_external_links` | boolean | `true` (if `for_agent=true`) | If `true` (and `for_agent` is `true`), displays external links in the format `"Text (URL)"`. Internal links remain just text. |
 | `proxy` | string | `null` | Proxy URL (e.g., `http://user:pass@proxy.com:8000`). |
 | `headers` | object | `null` | Custom HTTP headers dictionary. |
 | `cookies` | object | `null` | Custom cookies dictionary. |
@@ -49,6 +50,13 @@ Optimized for LLM context windows.
   },
   "cached": false
 }
+```
+
+*Note: If `show_external_links: true` is provided, external links will be appended with their URLs. Example:*
+```json
+  "navigation": {
+    "nav": ["About Us", "Our GitHub (https://github.com/example)"]
+  }
 ```
 
 ## 2. Navigate via Link Text (`POST /api/click_link`)

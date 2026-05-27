@@ -4,6 +4,7 @@ from curl_cffi import requests
 import trafilatura
 import yaml
 import json
+import tldextract
 import hashlib
 import os
 import time
@@ -39,6 +40,7 @@ class FetchRequest(BaseModel):
     include_links: bool = False
     include_images: bool = False
     for_agent: bool = False
+    show_external_links: bool | None = None
     proxy_retries: int = 3
     boilerplate: bool = True
 
@@ -117,7 +119,7 @@ def detect_required_capabilities(html: str) -> list[str]:
             
     return capabilities
 
-def extract_links_data(html: str, base_url: str, for_agent: bool):
+def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_links: bool = False):
     links_by_group = {
         "nav": {},
         "header": {},
@@ -158,12 +160,26 @@ def extract_links_data(html: str, base_url: str, for_agent: bool):
     final_links = {}
     url_map = {}
     
+    base_ext = tldextract.extract(base_url)
+    base_domain = f"{base_ext.domain}.{base_ext.suffix}"
+    
     for group, items in links_by_group.items():
         if not items: continue
         
         if for_agent:
-            # For agent: list of names
-            final_links[group] = list(items.keys())
+            # For agent: list of names (and optionally URLs for external links)
+            final_list = []
+            for text, url in items.items():
+                if show_external_links:
+                    link_ext = tldextract.extract(url)
+                    link_domain = f"{link_ext.domain}.{link_ext.suffix}"
+                    if link_domain and link_domain != base_domain:
+                        final_list.append(f"{text} ({url})")
+                    else:
+                        final_list.append(text)
+                else:
+                    final_list.append(text)
+            final_links[group] = final_list
         else:
             # For human/dev: mapping of name -> URL
             final_links[group] = items
@@ -251,7 +267,8 @@ def get_page(req: FetchRequest):
     yaml_frontmatter = yaml.dump(meta_dict, default_flow_style=False, allow_unicode=True) if meta_dict else ""
     final_markdown = f"---\n{yaml_frontmatter}---\n\n{extracted}" if yaml_frontmatter else extracted
     
-    final_links, url_map = extract_links_data(html, req.url, req.for_agent)
+    actual_show_ext = req.show_external_links if req.show_external_links is not None else req.for_agent
+    final_links, url_map = extract_links_data(html, req.url, req.for_agent, actual_show_ext)
     
     response_data = {
         "markdown": final_markdown,

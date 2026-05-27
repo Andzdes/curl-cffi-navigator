@@ -5,3 +5,4 @@ trafilatura
 pyyaml
 markdownify
 beautifulsoup4
+tldextract
