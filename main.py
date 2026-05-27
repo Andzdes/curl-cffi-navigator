@@ -58,6 +58,7 @@ class ClickRequest(BaseModel):
     proxy: str | None = None
     impersonate: str = "chrome"
     proxy_retries: int = 3
+    for_agent: bool = False
 
 class ClearCacheRequest(BaseModel):
     url: str | None = None
@@ -326,14 +327,22 @@ def click_link(req: ClickRequest):
         
     target_url = url_map.get(req.link_text)
     if not target_url:
-        raise HTTPException(status_code=404, detail=f"Link text '{req.link_text}' not found on {req.source_url}.")
+        if req.for_agent:
+            return {
+                "error": True,
+                "message": f"Agent Warning: Link text '{req.link_text}' not found.",
+                "markdown": f"**SYSTEM WARNING:** The link '{req.link_text}' does not exist on this page. You must ONLY use the exact link texts that were explicitly listed in the previous page's navigation blocks.",
+                "navigation": {}
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Link text '{req.link_text}' not found on {req.source_url}.")
         
-    # Simulate get_page for the new target url automatically as an agent
+    # Simulate get_page for the new target url
     fetch_req = FetchRequest(
         url=target_url,
         proxy=req.proxy,
         impersonate=req.impersonate,
-        for_agent=True,
+        for_agent=req.for_agent,
         proxy_retries=req.proxy_retries
     )
     return get_page(fetch_req)

@@ -85,6 +85,7 @@ Used by the LLM agent to navigate to a new page using ONLY the text of the link 
 - `proxy` (string): HTTP/HTTPS proxy URL.
 - `impersonate` (string): Browser to impersonate (default: "chrome").
 - `proxy_retries` (integer): Number of times to retry on proxy failure (default: 3).
+- `for_agent` (boolean): If `true`, enables agent-friendly responses (soft errors on 404) and formats the output for the LLM (default: `false`).
 
 ```json
 {
@@ -97,7 +98,10 @@ Used by the LLM agent to navigate to a new page using ONLY the text of the link 
 ```
 
 ### Response
-Returns the exact same structure as `/api/get_page` with `for_agent: true` for the new target page.
+Returns the exact same structure as `/api/get_page` for the new target page (depends on `for_agent` value).
+
+**Soft Error (If `for_agent=true` and link is not found):**
+Returns a 200 OK with `error: true` and a warning message in the `markdown` field to notify the LLM without crashing the workflow.
 
 ## Smart Router (JS / Headless Browser Requirement)
 If the server detects that the page requires JavaScript rendering (e.g. Cloudflare stub or empty React body), it will still return a **200 OK**, but with a special `requires` array instructing the client that additional capabilities are needed.
