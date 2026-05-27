@@ -68,8 +68,7 @@ def normalize_url_for_cache(url: str) -> str:
     # Remove http:// or https://
     url = re.sub(r'^https?://', '', url)
     # Remove www.
-    if url.startswith('www.'):
-        url = url[4:]
+    url = re.sub(r'^www\.', '', url)
     # Remove optional trailing slashes
     return url.rstrip('/')
 
@@ -325,14 +324,30 @@ def click_link(req: ClickRequest):
     with open(map_cache_path, "r", encoding="utf-8") as f:
         url_map = json.loads(f.read())
         
+    # Smart search for link_text
     target_url = url_map.get(req.link_text)
+    
+    if not target_url:
+        req_clean = req.link_text.strip().lower()
+        for k, v in url_map.items():
+            if k.strip().lower() == req_clean:
+                target_url = v
+                break
+                
+    if not target_url:
+        req_clean = req.link_text.strip().lower()
+        for k, v in url_map.items():
+            k_clean = k.strip().lower()
+            if req_clean in k_clean or k_clean in req_clean:
+                target_url = v
+                break
+
     if not target_url:
         if req.for_agent:
             return {
                 "error": True,
                 "message": f"Agent Warning: Link text '{req.link_text}' not found.",
-                "markdown": f"**SYSTEM WARNING:** The link '{req.link_text}' does not exist on this page. You must ONLY use the exact link texts that were explicitly listed in the previous page's navigation blocks.",
-                "navigation": {}
+                "markdown": f"**SYSTEM WARNING:** The link '{req.link_text}' does not exist on this page. You must ONLY use the exact link texts that were explicitly listed in the previous page's navigation blocks."
             }
         else:
             raise HTTPException(status_code=404, detail=f"Link text '{req.link_text}' not found on {req.source_url}.")
