@@ -16,6 +16,10 @@ from fastapi import Request
 
 from url_cleaner import cleaner
 
+# ==========================================
+# [ SETUP & MODELS ]
+# ==========================================
+
 app = FastAPI(title="Universal HTML Parser")
 
 @app.exception_handler(RequestValidationError)
@@ -68,6 +72,11 @@ class ClearCacheRequest(BaseModel):
     url: str | None = None
     clean_url: bool = True
 
+
+# ==========================================
+# [ CACHE & UTILITIES ]
+# ==========================================
+
 def normalize_url_for_cache(url: str) -> str:
     url = url.strip()
     # Remove http:// or https://
@@ -81,6 +90,11 @@ def get_cache_path(url: str, suffix: str) -> str:
     normalized_url = normalize_url_for_cache(url)
     hash_name = hashlib.md5(normalized_url.encode('utf-8')).hexdigest()
     return os.path.join(CACHE_DIR, f"{hash_name}_{suffix}")
+
+
+# ==========================================
+# [ NETWORK OPERATIONS ]
+# ==========================================
 
 def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies: dict=None, impersonate: str="chrome", proxy_retries: int=3):
     kwargs = {
@@ -119,6 +133,11 @@ def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies:
             
     raise HTTPException(status_code=500, detail=f"Failed to fetch {url}: {str(last_error)}")
 
+
+# ==========================================
+# [ PARSING & EXTRACTION ]
+# ==========================================
+
 def detect_required_capabilities(html: str) -> list[str]:
     capabilities = []
     html_lower = html.lower()
@@ -150,16 +169,37 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
     
     try:
         from lxml import html as lxml_html
+        from urllib.parse import urldefrag
+        
         tree = lxml_html.fromstring(html)
         tree.make_links_absolute(base_url)
         
         seen_urls = set()
+        base_no_frag, _ = urldefrag(base_url)
         
         def process_a_tag(a, group_name):
+            # Filter out behavioral UI elements pretending to be links
+            if a.get('role', '').lower() == 'button':
+                return
+                
             url = a.get('href')
-            if not url or not (url.startswith('http') or url.startswith('/')): return
+            if not url:
+                return
+                
+            url_lower = url.lower()
             
-            if clean_urls:
+            # Allow http(s), absolute paths (/), and contact links (email, phone)
+            # Filter out garbage schemas like javascript:
+            if not url_lower.startswith(('http', '/', 'mailto:', 'tel:')): 
+                return
+            
+            # Filter out anchor links pointing to the current page
+            url_no_frag, _ = urldefrag(url)
+            if url_no_frag == base_no_frag:
+                return
+            
+            # Clean standard web URLs only, preserve contact links as they are
+            if clean_urls and url_lower.startswith(('http', '/')):
                 url = cleaner.clean(url)
                 
             if url in seen_urls: return
@@ -225,6 +265,11 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
             url_map[url] = url
             
     return final_links, url_map
+
+
+# ==========================================
+# [ API ENDPOINTS ]
+# ==========================================
 
 @app.post("/api/get_page")
 def get_page(req: FetchRequest):
