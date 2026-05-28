@@ -39,7 +39,7 @@ SOCIAL_DOMAINS = {
     "facebook.com", "instagram.com", "twitter.com", "x.com", 
     "linkedin.com", "youtube.com", "tiktok.com", "pinterest.com", 
     "snapchat.com", "reddit.com", "discord.com", "t.me", 
-    "telegram.me", "whatsapp.com", "github.com", "wa.me"
+    "telegram.me", "whatsapp.com", "github.com", "wa.me", "threads.net"
 }
 
 class FetchRequest(BaseModel):
@@ -267,7 +267,7 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
         for text, url in items.items():
             url_map[text] = url
             
-    if extract_social_links and social_urls:
+    if extract_social_links:
         final_links["socials"] = social_urls
         # Adding to url_map so they are optionally reachable if needed, though they don't have text
         for url in social_urls:
@@ -309,7 +309,9 @@ def get_page(req: FetchRequest):
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(html, "html.parser")
             # Remove scripts, styles, and other non-content tags
-            for x in soup(["script", "style", "noscript", "svg", "iframe"]):
+            for x in soup(["script", "style", "noscript", "svg", "iframe", "nav"]):
+                x.extract()
+            for x in soup.find_all(attrs={"role": "navigation"}):
                 x.extract()
                 
             strip_tags = []
@@ -352,9 +354,7 @@ def get_page(req: FetchRequest):
         meta_dict = {
             "title": getattr(metadata, "title", None),
             "author": getattr(metadata, "author", None),
-            "url": getattr(metadata, "url", None),
-            "date": getattr(metadata, "date", None),
-            "hostname": getattr(metadata, "hostname", None)
+            "date": getattr(metadata, "date", None)
         }
         meta_dict = {k: v for k, v in meta_dict.items() if v is not None}
     
