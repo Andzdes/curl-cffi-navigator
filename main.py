@@ -60,7 +60,7 @@ class FetchRequest(BaseModel):
     clean_url: bool = True
 
 class ClickRequest(BaseModel):
-    source_url: str
+    current_url: str
     link_text: str
     proxy: str | None = None
     impersonate: str = "chrome"
@@ -356,6 +356,7 @@ def get_page(req: FetchRequest):
     final_links, url_map = extract_links_data(html, req.url, req.for_agent, actual_show_ext, req.extract_social_links, req.clean_url)
     
     response_data = {
+        "current_url": req.url,
         "markdown": final_markdown,
         "navigation": final_links,
         "cached": False
@@ -375,10 +376,16 @@ def get_page(req: FetchRequest):
 @app.post("/api/click_link")
 def click_link(req: ClickRequest):
     if req.clean_url:
-        req.source_url = cleaner.clean(req.source_url)
+        req.current_url = cleaner.clean(req.current_url)
         
-    map_cache_path = get_cache_path(req.source_url, "urlmap.json")
+    map_cache_path = get_cache_path(req.current_url, "urlmap.json")
     if not os.path.exists(map_cache_path):
+        if req.for_agent:
+            return {
+                "error": True,
+                "message": f"Agent Warning: Source URL link map not found.",
+                "markdown": "**SYSTEM WARNING:** The `current_url` you provided was not found in the cache. Are you sure you passed the correct `current_url`? Please check the `current_url` field from the previous page output and use it exactly."
+            }
         raise HTTPException(status_code=400, detail="Source URL link map not found in cache. Please call /api/get_page first.")
         
     with open(map_cache_path, "r", encoding="utf-8") as f:
@@ -410,7 +417,7 @@ def click_link(req: ClickRequest):
                 "markdown": f"**SYSTEM WARNING:** The link '{req.link_text}' does not exist on this page. You must ONLY use the exact link texts that were explicitly listed in the previous page's navigation blocks."
             }
         else:
-            raise HTTPException(status_code=404, detail=f"Link text '{req.link_text}' not found on {req.source_url}.")
+            raise HTTPException(status_code=404, detail=f"Link text '{req.link_text}' not found on {req.current_url}.")
         
     # Simulate get_page for the new target url
     fetch_req = FetchRequest(

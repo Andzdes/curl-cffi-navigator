@@ -31,6 +31,7 @@ Only `url` is required. All other parameters are optional.
 ### Response (`for_agent: false`)
 ```json
 {
+  "current_url": "https://example.com/page",
   "markdown": "---\ntitle: Page Title\n---\n\nMain content...",
   "navigation": {
     "nav": {
@@ -46,6 +47,7 @@ Only `url` is required. All other parameters are optional.
 Optimized for LLM context windows.
 ```json
 {
+  "current_url": "https://example.com/page",
   "markdown": "---\ntitle: Page Title\n---\n\nMain content...",
   "navigation": {
     "nav": ["About Us", "Contact"]
@@ -79,7 +81,7 @@ Used by the LLM agent to navigate to a new page using ONLY the text of the link 
 ### Request Body
 
 **Required Parameters:**
-- `source_url` (string): The URL of the page the agent is currently on.
+- `current_url` (string): The URL of the page the agent is currently on.
 - `link_text` (string): The exact text of the link the agent wants to click (e.g., "About Us" or "Contact").
 
 **Optional Parameters:**
@@ -87,11 +89,11 @@ Used by the LLM agent to navigate to a new page using ONLY the text of the link 
 - `impersonate` (string): Browser to impersonate (default: "chrome").
 - `proxy_retries` (integer): Number of times to retry on proxy failure (default: 3).
 - `for_agent` (boolean): If `true`, enables agent-friendly responses (soft errors on 404) and formats the output for the LLM (default: `false`).
-- `clean_url` (boolean): If `true`, strips tracking parameters from `source_url` before looking up link mappings (default: `true`).
+- `clean_url` (boolean): If `true`, strips tracking parameters from `current_url` before looking up link mappings (default: `true`).
 
 ```json
 {
-  "source_url": "https://example.com",
+  "current_url": "https://example.com",
   "link_text": "Contact",
   "proxy": null,
   "impersonate": "chrome",
@@ -102,7 +104,7 @@ Used by the LLM agent to navigate to a new page using ONLY the text of the link 
 ### Response
 Returns the exact same structure as `/api/get_page` for the new target page (depends on `for_agent` value).
 
-**Soft Error (If `for_agent=true` and link is not found):**
+**Soft Error (If `for_agent=true` and link or cache is not found):**
 Returns a 200 OK with `error: true` and a warning message in the `markdown` field to notify the LLM without crashing the workflow.
 
 ## Smart Router (JS / Headless Browser Requirement)
