@@ -212,7 +212,16 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
                     seen_urls.add(url)
                     return
             
-            text = a.text_content().strip()
+            raw_text = a.text_content().strip()
+            if not raw_text: return
+            
+            # Clean up multiline link texts by taking the longest non-empty line
+            lines = [line.strip() for line in raw_text.split('\n') if line.strip()]
+            if not lines: return
+            
+            text = max(lines, key=len)
+            text = re.sub(r'\s+', ' ', text).strip()
+            
             if not text: return
             
             links_by_group[group_name][text] = url
