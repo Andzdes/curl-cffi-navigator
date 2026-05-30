@@ -16,6 +16,7 @@ venv.bak/
 
 # Project specific
 cache/
+Docs/
 
 # Auto-added by generate_map.py
 generate_map.py

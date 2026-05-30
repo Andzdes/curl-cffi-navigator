@@ -108,11 +108,13 @@ Returns the exact same structure as `/api/get_page` for the new target page (dep
 Returns a 200 OK with `error: true` and a warning message in the `markdown` field to notify the LLM without crashing the workflow.
 
 ## Smart Router (JS / Headless Browser Requirement)
-If the server detects that the page requires JavaScript rendering (e.g. Cloudflare stub or empty React body), it will still return a **200 OK**, but with a special `requires` array instructing the client that additional capabilities are needed.
+If the server detects that the page requires JavaScript rendering or encounters an Anti-Bot WAF block, it will still return a **200 OK**, but with a special `requires` array instructing the client what capabilities are needed to bypass it (e.g., `javascript`, `captcha_solver`, `proxy_rotation`). It will also provide `vendor` and `block_type` fields for logging and specific routing.
 ```json
 {
-  "requires": ["javascript"],
-  "cached": false
+  "requires": ["javascript", "captcha_solver"],
+  "cached": false,
+  "vendor": "cloudflare",
+  "block_type": "captcha"
 }
 ```
 

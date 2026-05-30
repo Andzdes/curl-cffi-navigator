@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from curl_cffi import requests
+from dataclasses import dataclass, field
 import trafilatura
 import yaml
 import json
@@ -111,7 +112,20 @@ def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies:
     last_error = None
     for attempt in range(proxy_retries + 1):
         try:
-            return requests.get(url, **kwargs)
+            response = requests.get(url, **kwargs)
+            
+            if response.status_code in (403, 429, 503):
+                if response.status_code == 429:
+                    if proxy and attempt < proxy_retries:
+                        time.sleep(1)
+                        continue
+                else:
+                    block = detect_antibot(response)
+                    if block.is_blocked and block.block_type == "hard_block":
+                        if proxy and attempt < proxy_retries:
+                            time.sleep(1)
+                            continue
+            return response
         except Exception as e:
             last_error = e
             error_str = str(e).lower()
@@ -138,21 +152,157 @@ def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies:
 # [ PARSING & EXTRACTION ]
 # ==========================================
 
-def detect_required_capabilities(html: str) -> list[str]:
-    capabilities = []
-    html_lower = html.lower()
-    
-    if "enable javascript" in html_lower or \
-       "checking your browser" in html_lower or \
-       "just a moment..." in html_lower or \
-       ("cloudflare" in html_lower and "ray id" in html_lower):
-        capabilities.append("javascript")
-        
-    if len(html) < 1500 and "<script" in html_lower:
-        if "javascript" not in capabilities:
-            capabilities.append("javascript")
-            
-    return capabilities
+@dataclass
+class BlockResult:
+    is_blocked: bool = False
+    vendor: str | None = None
+    block_type: str | None = None
+    confidence: str = "none"
+    signals: list[str] = field(default_factory=list)
+
+    def __bool__(self):
+        return self.is_blocked
+
+def _hget(headers: dict, key: str) -> str:
+    return headers.get(key, headers.get(key.lower(), headers.get(key.upper(), "")))
+
+def _cookie_has(headers: dict, *fragments: str) -> bool:
+    cookie_val = _hget(headers, "set-cookie").lower()
+    return any(f.lower() in cookie_val for f in fragments)
+
+def _detect_cloudflare(status: int, headers: dict, body: str) -> BlockResult | None:
+    signals = []
+    if _hget(headers, "cf-mitigated").lower() == "challenge":
+        signals.append("header:cf-mitigated=challenge")
+        block_type = "captcha" if "cf-turnstile" in body else "js_challenge"
+        return BlockResult(True, "cloudflare", block_type, "definitive", signals)
+
+    cf_in_path = bool(_hget(headers, "cf-ray")) or "cloudflare" in _hget(headers, "server").lower()
+    if cf_in_path:
+        signals.append("header:cf-ray or server:cloudflare")
+
+    body_lower = body.lower()
+    html_challenge = (
+        'id="challenge-form"' in body or 'id="challenge-running"' in body
+        or 'id="challenge-error-title"' in body or "__cf_chl_f_tk" in body
+    )
+    if html_challenge:
+        signals.append("html:challenge-form/challenge-running")
+
+    turnstile = 'class="cf-turnstile"' in body and "data-sitekey" in body
+    if turnstile:
+        signals.append("html:cf-turnstile widget")
+
+    hard_block = "sorry, you have been blocked" in body_lower and "cloudflare ray id" in body_lower and status == 403
+    if hard_block:
+        signals.append("html:hard-block+ray-id + 403")
+
+    if html_challenge or hard_block:
+        if cf_in_path or status in (403, 503):
+            block_type = "hard_block" if hard_block else ("captcha" if turnstile else "js_challenge")
+            return BlockResult(True, "cloudflare", block_type, "definitive", signals)
+
+    if turnstile:
+        return BlockResult(True, "cloudflare", "captcha", "high", signals)
+    return None
+
+def _detect_datadome(status: int, headers: dict, body: str) -> BlockResult | None:
+    signals = []
+    if _hget(headers, "x-datadome"):
+        signals.append("header:x-datadome")
+        if status == 403 or "captcha-delivery.com" in body or _cookie_has(headers, "datadome"):
+            signals.append("status:403 or html:captcha-delivery or cookie:datadome")
+            return BlockResult(True, "datadome", "captcha", "definitive", signals)
+        return BlockResult(True, "datadome", "js_challenge", "high", signals)
+
+    if _cookie_has(headers, "datadome") and status == 403:
+        signals.append("cookie:datadome + status:403")
+        return BlockResult(True, "datadome", "captcha", "high", signals)
+    return None
+
+def _detect_perimeterx(status: int, headers: dict, body: str) -> BlockResult | None:
+    signals = []
+    if "window._pxappid" in body.lower() or "_pxJsClientSrc" in body:
+        signals.append("html:window._pxAppId")
+        return BlockResult(True, "perimeterx", "captcha", "definitive", signals)
+    if 'id="px-captcha"' in body:
+        signals.append("html:px-captcha div")
+        return BlockResult(True, "perimeterx", "captcha", "definitive", signals)
+    if "perimeterx.net" in body or "px-cdn.net" in body:
+        signals.append("html:perimeterx.net domain")
+        if status in (403, 429):
+            return BlockResult(True, "perimeterx", "captcha", "high", signals)
+    return None
+
+def _detect_imperva(status: int, headers: dict, body: str) -> BlockResult | None:
+    signals = []
+    if _hget(headers, "x-iinfo"):
+        signals.append("header:x-iinfo")
+    cdn_header = _hget(headers, "x-cdn").lower()
+    if "incapsula" in cdn_header or "imperva" in cdn_header:
+        signals.append("header:x-cdn=incapsula/imperva")
+    if _cookie_has(headers, "incap_ses", "visid_incap"):
+        signals.append("cookie:incap_ses or visid_incap")
+
+    body_lower = body.lower()
+    html_signals = [
+        ("powered by incapsula", "html:powered-by-incapsula"),
+        ("incapsula incident id", "html:incapsula-incident-id"),
+        ("_incapsula_resource", "html:incapsula-resource"),
+        ("subject=waf block page", "html:waf-block-page"),
+    ]
+    for phrase, label in html_signals:
+        if phrase in body_lower:
+            signals.append(label)
+
+    if signals:
+        is_hard_blocked = status in (403, 429, 503) or any(s.startswith("html:") for s in signals)
+        if is_hard_blocked:
+            return BlockResult(True, "imperva", "js_challenge", "definitive", signals)
+        return BlockResult(False, "imperva", None, "medium", signals)
+    return None
+
+def _detect_akamai(status: int, headers: dict, body: str) -> BlockResult | None:
+    signals = []
+    if "window.bmak" in body or "/_bm/async_api" in body:
+        signals.append("html:bmak sensor script")
+    if _cookie_has(headers, "_abck"):
+        signals.append("cookie:_abck")
+    if "akamaighost" in _hget(headers, "server").lower():
+        signals.append("header:server=AkamaiGHost")
+    if signals and status in (403, 429, 503):
+        return BlockResult(True, "akamai", "js_challenge", "high", signals)
+    return None
+
+def _detect_generic(status: int, headers: dict, body: str) -> BlockResult | None:
+    body_lower = body.lower()
+    generic_phrases = [
+        "enable javascript to continue",
+        "javascript is required",
+        "your browser does not support javascript",
+        "you have been blocked",
+        "access denied",
+        "bot protection",
+        "ddos protection",
+    ]
+    matched = [p for p in generic_phrases if p in body_lower]
+    if matched and status in (403, 429, 503):
+        return BlockResult(True, "generic", "js_challenge", "medium", matched)
+    return None
+
+def detect_antibot(response) -> BlockResult:
+    status = response.status_code
+    headers = dict(response.headers)
+    body = response.text[:32_768] if response.text else ""
+    detectors = [
+        _detect_cloudflare, _detect_datadome, _detect_perimeterx, 
+        _detect_imperva, _detect_akamai, _detect_generic
+    ]
+    for detector in detectors:
+        result = detector(status, headers, body)
+        if result and result.is_blocked:
+            return result
+    return BlockResult(is_blocked=False)
 
 def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_links: bool = False, extract_social_links: bool = False, clean_urls: bool = True):
     links_by_group = {
@@ -296,9 +446,20 @@ def get_page(req: FetchRequest):
     response = fetch_with_curl_cffi(req.url, req.proxy, req.headers, req.cookies, req.impersonate, req.proxy_retries)
     html = response.text
     
-    caps = detect_required_capabilities(html)
-    if caps:
-        return {"requires": caps, "cached": False}
+    block = detect_antibot(response)
+    if block.is_blocked:
+        requires = ["javascript"]
+        if block.block_type == "captcha":
+            requires.append("captcha_solver")
+        elif block.block_type == "hard_block":
+            requires = ["proxy_rotation"]
+
+        return {
+            "requires": requires, 
+            "cached": False, 
+            "vendor": block.vendor,
+            "block_type": block.block_type
+        }
         
     if response.status_code >= 400:
         raise HTTPException(status_code=500, detail=f"Failed to fetch {req.url}: HTTP Error {response.status_code}")
