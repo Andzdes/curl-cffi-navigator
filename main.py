@@ -64,10 +64,17 @@ class ClickRequest(BaseModel):
     current_url: str
     link_text: str
     proxy: str | None = None
+    headers: dict | None = None
+    cookies: dict | None = None
     impersonate: str = "chrome"
     proxy_retries: int = 3
     for_agent: bool = False
     clean_url: bool = True
+    extract_social_links: bool = False
+    show_external_links: bool | None = None
+    include_links: bool = False
+    include_images: bool = False
+    boilerplate: bool = True
 
 class ClearCacheRequest(BaseModel):
     url: str | None = None
@@ -149,8 +156,32 @@ def fetch_with_curl_cffi(url: str, proxy: str=None, headers: dict=None, cookies:
 
 
 # ==========================================
-# [ PARSING & EXTRACTION ]
+# [ ANTI-BOT DETECTION ]
 # ==========================================
+
+def is_interaction_dependent_link(url: str) -> bool:
+    url_lower = url.lower()
+    
+    # Common tracking/redirect domains that rely on JS or session state
+    tracking_domains = [
+        "hubspot.com",
+        "cta-service-cms2",
+        "hs-sites.com",
+        "bit.ly",
+        "t.co",
+        "lnkd.in",
+        "out.reddit.com"
+    ]
+    
+    if any(domain in url_lower for domain in tracking_domains):
+        return True
+        
+    # Check for opaque/encrypted payload patterns common in trackers
+    if "encryptedpayload=" in url_lower or "token=" in url_lower:
+        if "/track/" in url_lower or "/click" in url_lower:
+            return True
+            
+    return False
 
 @dataclass
 class BlockResult:
@@ -304,6 +335,10 @@ def detect_antibot(response) -> BlockResult:
             return result
     return BlockResult(is_blocked=False)
 
+# ==========================================
+# [ HTML PARSING & LINK EXTRACTION ]
+# ==========================================
+
 def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_links: bool = False, extract_social_links: bool = False, clean_urls: bool = True):
     links_by_group = {
         "nav": {},
@@ -427,7 +462,7 @@ def extract_links_data(html: str, base_url: str, for_agent: bool, show_external_
 
 
 # ==========================================
-# [ API ENDPOINTS ]
+# [ API - GET PAGE ]
 # ==========================================
 
 @app.post("/api/get_page")
@@ -462,6 +497,24 @@ def get_page(req: FetchRequest):
         }
         
     if response.status_code >= 400:
+        if req.for_agent:
+            requires = []
+            if is_interaction_dependent_link(req.url):
+                requires.append("javascript")
+                return {
+                    "error": True,
+                    "requires": requires,
+                    "vendor": "tracking_system",
+                    "block_type": "js_redirect_required",
+                    "message": f"Agent Warning: Unresolved JS-dependent redirect (HTTP {response.status_code})",
+                    "markdown": f"**SYSTEM WARNING:** The target URL is a client-side tracking link that failed to resolve via standard HTTP ({response.status_code} Error). This is not a dead link; it requires JavaScript execution to construct the final destination. Please escalate this action to a JavaScript-enabled browser tool if available."
+                }
+            else:
+                return {
+                    "error": True,
+                    "message": f"Agent Warning: HTTP Error {response.status_code}",
+                    "markdown": f"**SYSTEM WARNING:** The server returned an HTTP {response.status_code} error when trying to fetch the page. This link might be broken, or it requires JavaScript/auth to redirect properly. Please go back and try another link."
+                }
         raise HTTPException(status_code=500, detail=f"Failed to fetch {req.url}: HTTP Error {response.status_code}")
     
     if req.boilerplate:
@@ -543,6 +596,10 @@ def get_page(req: FetchRequest):
         
     return response_data
 
+# ==========================================
+# [ API - CLICK LINK ]
+# ==========================================
+
 @app.post("/api/click_link")
 def click_link(req: ClickRequest):
     if req.clean_url:
@@ -593,12 +650,23 @@ def click_link(req: ClickRequest):
     fetch_req = FetchRequest(
         url=target_url,
         proxy=req.proxy,
+        headers=req.headers,
+        cookies=req.cookies,
         impersonate=req.impersonate,
-        for_agent=req.for_agent,
         proxy_retries=req.proxy_retries,
-        clean_url=req.clean_url
+        for_agent=req.for_agent,
+        clean_url=req.clean_url,
+        extract_social_links=req.extract_social_links,
+        show_external_links=req.show_external_links,
+        include_links=req.include_links,
+        include_images=req.include_images,
+        boilerplate=req.boilerplate
     )
     return get_page(fetch_req)
+
+# ==========================================
+# [ API - CACHE CLEAR ]
+# ==========================================
 
 @app.post("/api/clear_cache")
 def clear_cache(req: ClearCacheRequest):

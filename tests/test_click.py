@@ -1,6 +1,9 @@
 import os
+import sys
 import json
 import traceback
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from main import get_page, click_link, FetchRequest, ClickRequest
 # Load .env manually to avoid extra dependencies
 for env_path in [".env", "../.env"]:

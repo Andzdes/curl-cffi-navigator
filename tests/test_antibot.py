@@ -1,6 +1,9 @@
 import os
+import sys
 import json
 import time
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from main import get_page, FetchRequest
 
 # Load .env

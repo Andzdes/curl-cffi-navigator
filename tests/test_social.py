@@ -1,6 +1,9 @@
 import os
+import sys
 from curl_cffi import requests
 from lxml import html
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Load .env manually to avoid extra dependencies
 for env_path in [".env", "../.env"]:
